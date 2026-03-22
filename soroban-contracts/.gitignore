@@ -1,7 +1,8 @@
 # Rust / Cargo
-/target/
+target/
 **/*.rs.bk
 Cargo.lock
+test_snapshots/
 
 # IDE
 .idea/
