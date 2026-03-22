@@ -159,6 +159,18 @@ class TestContractEventViewSet:
         assert response.status_code == status.HTTP_200_OK
         assert len(response.data["results"]) == 1
 
+    def test_filter_events_by_decoding_status(self, authenticated_client, contract):
+        ContractEventFactory(contract=contract, decoding_status="success")
+        ContractEventFactory(contract=contract, decoding_status="failed")
+        ContractEventFactory(contract=contract, decoding_status="no_abi")
+
+        url = reverse("event-list")
+        response = authenticated_client.get(url, {"decoding_status": "failed"})
+
+        assert response.status_code == status.HTTP_200_OK
+        assert len(response.data["results"]) == 1
+        assert response.data["results"][0]["decoding_status"] == "failed"
+
 
 @pytest.mark.django_db
 class TestWebhookSubscriptionViewSet:

@@ -1,0 +1,9 @@
+subscription OnContractEvent($contractId: String!) {
+  contractEvent(contractId: $contractId) {
+    id
+    eventType
+    ledgerSequence
+    timestamp
+    payload
+  }
+}

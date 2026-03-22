@@ -132,21 +132,6 @@ export function FilterBar({ contracts, filters, onFilterChange, onExport }: Filt
           </label>
         </div>
 
-        <div className={styles.controlGrid}>
-          <label className={styles.fieldRow} htmlFor="search-input">
-            <span>Search</span>
-            <input
-              id="search-input"
-              className={styles.fieldInput}
-              type="text"
-              placeholder="Search events..."
-              value={localFilters.searchQuery}
-              onChange={(e) =>
-                setLocalFilters((prev) => ({ ...prev, searchQuery: e.target.value }))
-              }
-            />
-          </label>
-        </div>
 
         <div className={styles.row}>
           <button type="button" className={styles.btn} onClick={handleApply}>

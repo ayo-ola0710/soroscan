@@ -291,14 +291,17 @@ export function EventExplorerView({ contractId }: { contractId: string }) {
 
           <div className={styles.tableWrap}>
             <table className={styles.eventTable}>
+              <caption className={styles.srOnly}>
+                Contract events for {contractName}
+              </caption>
               <thead>
                 <tr>
-                  <th>Timestamp</th>
-                  <th>Type</th>
-                  <th>Ledger</th>
-                  <th>Event Index</th>
-                  <th>Transaction</th>
-                  <th>Payload</th>
+                  <th scope="col">Timestamp</th>
+                  <th scope="col">Type</th>
+                  <th scope="col">Ledger</th>
+                  <th scope="col">Event Index</th>
+                  <th scope="col">Transaction</th>
+                  <th scope="col">Payload</th>
                 </tr>
               </thead>
               <tbody>

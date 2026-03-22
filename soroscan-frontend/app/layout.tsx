@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { Inter, JetBrains_Mono } from "next/font/google"
 import "./globals.css"
 import { Providers } from "./providers"
+import { SkipToContent } from "@/components/ui/SkipToContent"
 
 const inter = Inter({
   variable: "--font-inter",
@@ -80,7 +81,12 @@ export default function RootLayout({
       <body
         className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased bg-terminal-black text-terminal-green`}
       >
-        <Providers>{children}</Providers>
+        <SkipToContent />
+        <Providers>
+          <main id="main-content">
+            {children}
+          </main>
+        </Providers>
       </body>
     </html>
   )

@@ -178,6 +178,28 @@ export const ALL_EVENTS_QUERY = `
   }
 `;
 
+export const GET_SYSTEM_METRICS_QUERY = `
+  query GetSystemMetrics {
+    systemMetrics {
+      eventsIndexedToday
+      eventsIndexedTotal
+      webhookSuccessRate
+      avgWebhookDeliveryTime
+      activeContracts
+      lastSynced
+      dbStatus
+      redisStatus
+    }
+    recentErrors(limit: 10) {
+      id
+      timestamp
+      level
+      message
+      context
+    }
+  }
+`;
+
 export const EVENTS_EXPORT_QUERY = `
   query EventsExport(
     $contractId: String!
@@ -327,4 +349,31 @@ export async function fetchEventsForExport(variables: EventsVariables): Promise<
     variables,
   );
   return data.events ?? [];
+}
+
+export interface SystemMetricsData {
+  systemMetrics: {
+    eventsIndexedToday: number;
+    eventsIndexedTotal: number;
+    webhookSuccessRate: number;
+    avgWebhookDeliveryTime: number;
+    activeContracts: number;
+    lastSynced: string | null;
+    dbStatus: string;
+    redisStatus: string;
+  };
+  recentErrors: Array<{
+    id: number | string;
+    timestamp: string;
+    level: "ERROR" | "WARNING" | "INFO";
+    message: string;
+    context?: string;
+  }>;
+}
+
+export async function fetchSystemMetrics(): Promise<SystemMetricsData> {
+  return graphqlRequest<SystemMetricsData, Record<string, never>>(
+    GET_SYSTEM_METRICS_QUERY,
+    {},
+  );
 }

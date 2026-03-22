@@ -46,12 +46,14 @@ FRONTEND_BASE_URL = env("FRONTEND_BASE_URL", default="http://localhost:3000")
 # Application definition
 INSTALLED_APPS = [
     "daphne",
+    "django_prometheus",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",
     # Third-party
     "rest_framework",
     "drf_spectacular",
@@ -63,18 +65,30 @@ INSTALLED_APPS = [
     "soroscan.ingest",
 ]
 
+ENABLE_SILK = env.bool("ENABLE_SILK", default=False)
+
 MIDDLEWARE = [
+    # PrometheusBeforeMiddleware must be first to capture all requests.
+    "django_prometheus.middleware.PrometheusBeforeMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "soroscan.middleware.ReverseProxyFixedIPMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "soroscan.middleware.RequestIdMiddleware",
+    "soroscan.middleware.SlowQueryMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    # PrometheusAfterMiddleware must be last to record response codes/latencies.
+    "django_prometheus.middleware.PrometheusAfterMiddleware",
 ]
+
+if ENABLE_SILK:
+    MIDDLEWARE.insert(0, "silk.middleware.SilkyMiddleware")
+    if "silk" not in INSTALLED_APPS:
+        INSTALLED_APPS.append("silk")
 
 ROOT_URLCONF = "soroscan.urls"
 
@@ -158,6 +172,7 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_THROTTLE_CLASSES": [
+        "soroscan.throttles.APIKeyThrottle",
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ],
@@ -213,6 +228,18 @@ CELERY_TASK_ROUTES = {
     "soroscan.ingest.tasks.backfill_contract_events": {"queue": "backfill"},
 }
 
+# Celery Beat periodic task schedule
+CELERY_BEAT_SCHEDULE = {
+    "cleanup-webhook-delivery-logs": {
+        "task": "soroscan.ingest.tasks.cleanup_webhook_delivery_logs",
+        "schedule": 86400,  # daily
+    },
+    "cleanup-silk-data": {
+        "task": "soroscan.ingest.tasks.cleanup_silk_data",
+        "schedule": 604800,  # weekly
+    },
+}
+
 # Stellar / Soroban Configuration
 SOROBAN_RPC_URL = env("SOROBAN_RPC_URL", default="https://soroban-testnet.stellar.org")
 STELLAR_NETWORK_PASSPHRASE = env(
@@ -221,6 +248,11 @@ STELLAR_NETWORK_PASSPHRASE = env(
 )
 SOROSCAN_CONTRACT_ID = env("SOROSCAN_CONTRACT_ID", default="")
 INDEXER_SECRET_KEY = env("INDEXER_SECRET_KEY", default="")
+
+# Prometheus
+# Expose the /metrics endpoint without authentication.
+# The URL is registered in urls.py via django_prometheus.urls.
+PROMETHEUS_EXPORT_MIGRATIONS = False  # avoid migration noise in metrics
 
 # Logging: set LOG_FORMAT=json for structured JSON logs (no PII in messages or extra).
 LOG_FORMAT = env("LOG_FORMAT", default="")
@@ -253,6 +285,55 @@ LOGGING = {
         "level": "INFO",
     },
 }
+
+# ---------------------------------------------------------------------------
+# Slow-query logging (Issue: perf monitoring)
+# ---------------------------------------------------------------------------
+LOGGING_SLOW_QUERIES_THRESHOLD_MS = env.int("SLOW_QUERY_THRESHOLD_MS", default=100)
+
+# Ensure log directories exist before configuring handlers
+_LOG_DIR = BASE_DIR / "logs"
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
+(BASE_DIR / "logs" / "profiler").mkdir(parents=True, exist_ok=True)
+
+# Extend LOGGING to capture slow queries in a separate rotating file
+LOGGING.setdefault("loggers", {})
+LOGGING["handlers"]["slow_queries"] = {
+    "level": "WARNING",
+    "class": "logging.handlers.TimedRotatingFileHandler",
+    "filename": str(BASE_DIR / "logs" / "slow_queries.log"),
+    "when": "midnight",
+    "backupCount": 7,
+    "formatter": "default",
+}
+LOGGING["loggers"]["soroscan.slow_queries"] = {
+    "handlers": ["slow_queries", "console"],
+    "level": "WARNING",
+    "propagate": False,
+}
+
+# ---------------------------------------------------------------------------
+# Django Silk profiler (Issue: perf monitoring) — enabled via ENABLE_SILK=true
+# ---------------------------------------------------------------------------
+SILK_PROFILER_LOG_DIR = env("SILK_PROFILER_LOG_DIR", default=str(BASE_DIR / "logs" / "profiler"))
+SILK_META_MAX_RESPONSE_SIZE = 4096  # bytes, keep overhead minimal
+SILK_MAX_RECORDED_REQUESTS = 1000   # ring-buffer per process
+SILK_AUTHENTICATION_REQUIRED = not DEBUG
+SILK_AUTHORISATION_REQUIRED = not DEBUG
+
+# ---------------------------------------------------------------------------
+# Email backend (Issue: event-driven alerts)
+# ---------------------------------------------------------------------------
+EMAIL_BACKEND = env("EMAIL_BACKEND", default="django.core.mail.backends.smtp.EmailBackend")
+EMAIL_HOST = env("EMAIL_HOST", default="smtp.gmail.com")
+EMAIL_PORT = env.int("EMAIL_PORT", default=587)
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", default=True)
+EMAIL_HOST_USER = env("EMAIL_HOST_USER", default="")
+EMAIL_HOST_PASSWORD = env("EMAIL_HOST_PASSWORD", default="")
+DEFAULT_FROM_EMAIL = env("DEFAULT_FROM_EMAIL", default="noreply@soroscan.io")
+
+# Alert settings
+SLACK_ALERT_TIMEOUT_SECONDS = env.int("SLACK_ALERT_TIMEOUT_SECONDS", default=10)
 
 # Sentry (optional): init only when SENTRY_DSN is set. Celery task failures reported via CeleryIntegration.
 SENTRY_DSN = env("SENTRY_DSN", default="")

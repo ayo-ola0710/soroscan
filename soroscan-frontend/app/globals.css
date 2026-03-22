@@ -149,4 +149,31 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  /* ── WCAG 2.1 AA §2.4.11 – Focus Appearance ───────────────────────
+     Enforce a 2 px solid ring with 2 px offset on all interactive
+     elements when navigated via keyboard. Uses focus-visible so
+     mouse users are not affected.
+  ──────────────────────────────────────────────────────────────────── */
+  :focus-visible {
+    outline: 2px solid var(--color-terminal-green);
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+
+  /* ── WCAG 2.1 AA §2.4.1 – Skip Navigation ────────────────────────
+     The .sr-only utility hides content visually while keeping it
+     accessible to assistive technology.
+  ──────────────────────────────────────────────────────────────────── */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
 }

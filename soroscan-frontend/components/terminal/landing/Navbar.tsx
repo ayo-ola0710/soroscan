@@ -4,7 +4,9 @@ import * as React from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Button } from "../Button"
-import { Menu, X } from "lucide-react"
+import { Menu, X, LogOut } from "lucide-react"
+import { isLoggedIn, clearTokens } from "@/lib/auth"
+import { useRouter } from "next/navigation"
 
 const navLinks = [
   { href: "/docs",      label: "DOCS" },
@@ -15,7 +17,19 @@ const navLinks = [
 
 export function Navbar() {
   const [open, setOpen] = React.useState(false)
+  const [authenticated, setAuthenticated] = React.useState(false)
   const pathname = usePathname()
+  const router = useRouter()
+
+  React.useEffect(() => {
+    setAuthenticated(isLoggedIn())
+  }, [pathname])
+
+  const handleLogout = () => {
+    clearTokens()
+    setAuthenticated(false)
+    router.push("/")
+  }
 
   return (
     <nav className="border-b border-terminal-green/30 px-6 md:px-8 py-4 flex flex-col bg-terminal-black/80 backdrop-blur-md sticky top-0 z-50">
@@ -55,30 +69,54 @@ export function Navbar() {
           )}
         </div>
 
-        <div className="flex items-center gap-3">
-          <a
-            href="/api/docs/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hidden md:block"
-          >
-            <Button size="sm" variant="secondary">GET_API_KEY</Button>
-          </a>
+          <div className="hidden md:flex items-center gap-3">
+            {authenticated ? (
+              <Button 
+                size="sm" 
+                variant="secondary" 
+                onClick={handleLogout}
+                className="group"
+              >
+                <LogOut size={14} className="mr-2 group-hover:text-terminal-danger transition-colors" />
+                LOGOUT
+              </Button>
+            ) : (
+              <Link href="/login">
+                <Button size="sm" variant="secondary">SIGN_IN</Button>
+              </Link>
+            )}
+            
+            <a
+              href="/api/docs/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hidden md:block"
+            >
+              <Button size="sm" variant="secondary">GET_API_KEY</Button>
+            </a>
+          </div>
 
           {/* Mobile hamburger */}
           <button
             className="md:hidden text-terminal-green hover:text-terminal-cyan transition-colors p-1"
             onClick={() => setOpen((o) => !o)}
             aria-label="Toggle menu"
+            aria-expanded={open}
+            aria-controls="mobile-menu"
+            aria-haspopup="true"
           >
             {open ? <X size={20} /> : <Menu size={20} />}
           </button>
         </div>
-      </div>
 
       {/* Mobile menu */}
       {open && (
-        <div className="md:hidden mt-4 pb-2 border-t border-terminal-green/20 pt-4 flex flex-col gap-4 text-xs uppercase tracking-widest text-terminal-gray">
+        <div
+          id="mobile-menu"
+          role="navigation"
+          aria-label="Mobile navigation"
+          className="md:hidden mt-4 pb-2 border-t border-terminal-green/20 pt-4 flex flex-col gap-4 text-xs uppercase tracking-widest text-terminal-gray"
+        >
           {navLinks.map((link) =>
             link.external ? (
               <a
@@ -103,6 +141,25 @@ export function Navbar() {
                 {link.label}
               </Link>
             )
+          )}
+          {authenticated ? (
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 hover:text-terminal-danger transition-colors py-1 text-left"
+            >
+              <LogOut size={14} />
+              LOGOUT
+            </button>
+          ) : (
+            <Link
+              href="/login"
+              className={`hover:text-terminal-green transition-colors py-1 ${
+                pathname === "/login" ? "text-terminal-green" : ""
+              }`}
+              onClick={() => setOpen(false)}
+            >
+              SIGN_IN
+            </Link>
           )}
           <a href="/api/docs/" target="_blank" rel="noopener noreferrer" className="mt-2">
             <Button size="sm" variant="secondary" className="w-full justify-center">GET_API_KEY</Button>

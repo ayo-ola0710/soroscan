@@ -54,6 +54,68 @@ class TrackedContract(models.Model):
         return f"{self.name} ({self.contract_id[:8]}...)"
 
 
+class ContractInvocation(models.Model):
+    """
+    Record of a contract function invocation that generated events.
+    """
+
+    tx_hash = models.CharField(
+        max_length=64,
+        db_index=True,
+        help_text="Transaction hash",
+    )
+    caller = models.CharField(
+        max_length=56,
+        db_index=True,
+        help_text="Source account address (G...)",
+    )
+    contract = models.ForeignKey(
+        TrackedContract,
+        on_delete=models.CASCADE,
+        related_name="invocations",
+        help_text="Target contract invoked",
+    )
+    function_name = models.CharField(
+        max_length=128,
+        db_index=True,
+        help_text="Contract function name",
+    )
+    parameters = models.JSONField(
+        help_text="Function parameters in XDR-encoded form",
+    )
+    result = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="Function result in XDR-encoded form",
+    )
+    ledger_sequence = models.PositiveBigIntegerField(
+        db_index=True,
+        help_text="Ledger sequence number",
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        db_index=True,
+        help_text="Timestamp when record was created",
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["contract", "created_at"]),
+            models.Index(fields=["caller"]),
+            models.Index(fields=["tx_hash"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tx_hash", "contract"],
+                name="unique_tx_hash_contract",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.function_name}@{self.ledger_sequence} ({self.contract.name})"
+
+
 class EventSchema(models.Model):
     """
     Versioned JSON schema for contract event types (issue #17).
@@ -83,6 +145,34 @@ class EventSchema(models.Model):
 
     def __str__(self):
         return f"{self.event_type} v{self.version} ({self.contract.name})"
+
+
+class ContractABI(models.Model):
+    """
+    ABI definition for decoding raw Soroban event payloads (issue #58).
+
+    Stores a JSON array of event definitions that map positional XDR
+    fields to human-readable names and types.
+    """
+
+    contract = models.OneToOneField(
+        TrackedContract,
+        on_delete=models.CASCADE,
+        related_name="abi",
+        help_text="Contract this ABI applies to",
+    )
+    abi_json = models.JSONField(
+        help_text='JSON array of event definitions: [{"name": "...", "fields": [{"name": "...", "type": "..."}]}]',
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Contract ABI"
+        verbose_name_plural = "Contract ABIs"
+
+    def __str__(self):
+        return f"ABI for {self.contract}"
 
 
 class ContractEvent(models.Model):
@@ -133,6 +223,30 @@ class ContractEvent(models.Model):
     timestamp = models.DateTimeField(db_index=True, help_text="Event timestamp")
     tx_hash = models.CharField(max_length=64, help_text="Transaction hash")
     raw_xdr = models.TextField(blank=True, help_text="Raw XDR for debugging")
+    invocation = models.ForeignKey(
+        "ContractInvocation",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="events",
+        help_text="Invocation that generated this event",
+    )
+    decoded_payload = models.JSONField(
+        null=True,
+        blank=True,
+        help_text="ABI-decoded event payload (human-readable fields)",
+    )
+    decoding_status = models.CharField(
+        max_length=16,
+        choices=[
+            ("success", "Success"),
+            ("failed", "Failed"),
+            ("no_abi", "No ABI"),
+        ],
+        default="no_abi",
+        db_index=True,
+        help_text="Result of ABI-based XDR decoding",
+    )
 
     class Meta:
         ordering = ["-timestamp"]
@@ -142,6 +256,7 @@ class ContractEvent(models.Model):
             models.Index(fields=["ledger"]),
             models.Index(fields=["tx_hash"]),
             models.Index(fields=["contract", "ledger", "event_index"]),
+            models.Index(fields=["invocation"]),
         ]
         constraints = [
             models.UniqueConstraint(
@@ -282,3 +397,175 @@ class IndexerState(models.Model):
 
     def __str__(self):
         return f"{self.key}: {self.value}"
+
+
+# ---------------------------------------------------------------------------
+# Issue #X: Tiered rate limiting with per-API-key and per-contract quotas
+# ---------------------------------------------------------------------------
+
+class APIKey(models.Model):
+    """
+    API key model with tiered rate limiting.
+    Keys are at least 32 characters and randomly generated.
+    """
+
+    class Tier(models.TextChoices):
+        FREE = "free", "Free"
+        PRO = "pro", "Pro"
+        ENTERPRISE = "enterprise", "Enterprise"
+
+    TIER_QUOTAS: dict = {
+        "free": 50,
+        "pro": 5000,
+        "enterprise": None,  # unlimited — stored as large int
+    }
+    UNLIMITED_QUOTA = 10_000_000
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="api_keys",
+    )
+    name = models.CharField(max_length=128)
+    key = models.CharField(max_length=64, unique=True, db_index=True)
+    tier = models.CharField(
+        max_length=16,
+        choices=Tier.choices,
+        default=Tier.FREE,
+    )
+    quota_per_hour = models.IntegerField(
+        help_text="Max requests per hour. Auto-set from tier on creation.",
+    )
+    is_active = models.BooleanField(default=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def save(self, *args, **kwargs):
+        if not self.key:
+            # At least 32 chars, URL-safe random token
+            self.key = secrets.token_urlsafe(48)[:64]
+        if not self.quota_per_hour:
+            quota = self.TIER_QUOTAS.get(self.tier, 50)
+            self.quota_per_hour = quota if quota is not None else self.UNLIMITED_QUOTA
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.name} [{self.tier}] ({self.user})"
+
+
+class ContractQuota(models.Model):
+    """
+    Per-contract rate limit override for a specific APIKey.
+    Cannot exceed the key's tier limit.
+    """
+
+    contract = models.ForeignKey(
+        TrackedContract,
+        on_delete=models.CASCADE,
+        related_name="contract_quotas",
+    )
+    api_key = models.ForeignKey(
+        APIKey,
+        on_delete=models.CASCADE,
+        related_name="contract_quotas",
+    )
+    quota_per_hour = models.IntegerField(
+        help_text="Custom requests-per-hour for this contract. Cannot exceed the key tier limit.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("contract", "api_key")
+        ordering = ["-created_at"]
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        if (
+            self.api_key.tier != APIKey.Tier.ENTERPRISE
+            and self.quota_per_hour > self.api_key.quota_per_hour
+        ):
+            raise ValidationError(
+                "Contract quota_per_hour cannot exceed the API key's tier limit "
+                f"({self.api_key.quota_per_hour}/hr)."
+            )
+
+    def __str__(self):
+        return f"{self.api_key.name} / {self.contract.name}: {self.quota_per_hour}/hr"
+
+
+# ---------------------------------------------------------------------------
+# Issue #X: Event-driven alerts with rule engine and notifications
+# ---------------------------------------------------------------------------
+
+class AlertRule(models.Model):
+    """
+    Alert rule attached to a contract with a JSON condition AST.
+    Supports AND / OR / NOT logic with field comparisons.
+    """
+
+    MAX_RULES_PER_CONTRACT = 100
+
+    contract = models.ForeignKey(
+        TrackedContract,
+        on_delete=models.CASCADE,
+        related_name="alert_rules",
+    )
+    name = models.CharField(max_length=256)
+    condition = models.JSONField(
+        help_text="Condition AST: {'op': 'and', 'conditions': [...]}"
+    )
+    action_type = models.CharField(
+        max_length=16,
+        choices=[
+            ("slack", "Slack"),
+            ("email", "Email"),
+            ("webhook", "Webhook"),
+        ],
+    )
+    action_target = models.TextField(
+        help_text="Slack channel, email address, or webhook URL"
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.name} ({self.contract.name})"
+
+
+class AlertExecution(models.Model):
+    """
+    Immutable record of each rule trigger attempt (sent / failed).
+    """
+
+    rule = models.ForeignKey(
+        AlertRule,
+        on_delete=models.CASCADE,
+        related_name="executions",
+    )
+    event = models.ForeignKey(
+        ContractEvent,
+        on_delete=models.CASCADE,
+        related_name="alert_executions",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=[("sent", "Sent"), ("failed", "Failed")],
+    )
+    response = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["rule", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"Alert {self.rule.name}: {self.status} @ {self.created_at}"

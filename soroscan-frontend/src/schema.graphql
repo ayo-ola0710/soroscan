@@ -2,7 +2,54 @@
 # Replace this with actual schema introspection when backend is running
 
 type Query {
-  events(contractId: String!, first: Int!): EventConnection!
+  # Events
+  events(contractId: String, first: Int!): EventConnection!
+
+  # Auth / user
+  me: User
+
+  # Admin / system
+  systemMetrics: SystemMetrics!
+  recentErrors(limit: Int): [ErrorLog!]!
+}
+
+type Mutation {
+  login(email: String!, password: String!): AuthPayload!
+  refreshToken(refresh: String!): AuthPayload!
+}
+
+type Subscription {
+  contractEvent(contractId: String!): ContractEvent!
+}
+
+type AuthPayload {
+  access: String!
+  refresh: String!
+  user: User!
+}
+
+type User {
+  id: ID!
+  email: String!
+}
+
+type SystemMetrics {
+  eventsIndexedToday: Int!
+  eventsIndexedTotal: Int!
+  webhookSuccessRate: Float!
+  avgWebhookDeliveryTime: Float!
+  activeContracts: Int!
+  lastSynced: String
+  dbStatus: String!
+  redisStatus: String!
+}
+
+type ErrorLog {
+  id: ID!
+  timestamp: String!
+  level: String!
+  message: String!
+  context: String
 }
 
 type EventConnection {
@@ -19,4 +66,12 @@ type Event {
   eventType: String!
   data: String!
   createdAt: String!
+}
+
+type ContractEvent {
+  id: ID!
+  eventType: String!
+  ledgerSequence: Int!
+  timestamp: String!
+  payload: String!
 }

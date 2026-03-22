@@ -4,9 +4,27 @@ import { CodeSnippet } from "@/components/terminal/landing/CodeSnippet"
 import { Features } from "@/components/terminal/landing/Features"
 import { Hero } from "@/components/terminal/landing/Hero"
 
-// ── Mock next/navigation (usePathname) ─────────────────────────────
+// ── Mock next/navigation (usePathname, useRouter) ──────────────────
 jest.mock("next/navigation", () => ({
   usePathname: () => "/",
+  useRouter: () => ({
+    push: jest.fn(),
+    back: jest.fn(),
+    forward: jest.fn(),
+    refresh: jest.fn(),
+    replace: jest.fn(),
+    prefetch: jest.fn(),
+  }),
+}))
+
+// ── Mock @/lib/auth ────────────────────────────────────────────────
+jest.mock("@/lib/auth", () => ({
+  isLoggedIn: jest.fn(() => false),
+  clearTokens: jest.fn(),
+  getAccessToken: jest.fn(() => null),
+  getRefreshToken: jest.fn(() => null),
+  setTokens: jest.fn(),
+  refreshAccessToken: jest.fn(),
 }))
 
 // ── Mock next/link to simple <a> ───────────────────────────────────

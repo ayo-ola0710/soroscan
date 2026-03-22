@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from factory.django import DjangoModelFactory
 
 from soroscan.ingest.models import (
+    ContractABI,
     ContractEvent,
     EventSchema,
     TrackedContract,
@@ -82,3 +83,20 @@ class WebhookDeliveryLogFactory(DjangoModelFactory):
     status_code = 200
     success = True
     error = ""
+
+
+class ContractABIFactory(DjangoModelFactory):
+    class Meta:
+        model = ContractABI
+
+    contract = factory.SubFactory(TrackedContractFactory)
+    abi_json = [
+        {
+            "name": "transfer",
+            "fields": [
+                {"name": "from", "type": "Address"},
+                {"name": "to", "type": "Address"},
+                {"name": "amount", "type": "I128"},
+            ],
+        }
+    ]

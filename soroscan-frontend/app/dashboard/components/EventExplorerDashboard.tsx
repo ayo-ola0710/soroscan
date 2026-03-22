@@ -5,10 +5,12 @@ import { EventTable } from "./EventTable";
 import { FilterBar } from "./FilterBar";
 import { EventDetailModal } from "./EventDetailModal";
 import { PaginationControls } from "./PaginationControls";
+import { AdvancedSearch } from "./AdvancedSearch";
 import { fetchAllContracts, fetchExplorerEvents } from "@/components/ingest/graphql";
 import type { EventRecord } from "@/components/ingest/types";
 import styles from "@/components/ingest/ingest-terminal.module.css";
 import { useToast } from "@/context/ToastContext";
+import { parseSearchQuery, matchesFilters } from "@/lib/search-parser";
 
 const PAGE_SIZE = 20;
 
@@ -104,16 +106,9 @@ export function EventExplorerDashboard() {
       return;
     }
 
-    const query = filters.searchQuery.toLowerCase();
-    const filtered = events.filter((event) => {
-      const payloadStr = JSON.stringify(event.payload).toLowerCase();
-      return (
-        event.eventType.toLowerCase().includes(query) ||
-        event.contractId.toLowerCase().includes(query) ||
-        event.txHash.toLowerCase().includes(query) ||
-        payloadStr.includes(query)
-      );
-    });
+    const parsed = parseSearchQuery(filters.searchQuery);
+
+    const filtered = events.filter((event) => matchesFilters(event, parsed));
     setFilteredEvents(filtered);
   }, [events, filters.searchQuery]);
 
@@ -195,6 +190,11 @@ export function EventExplorerDashboard() {
           filters={filters}
           onFilterChange={handleFilterChange}
           onExport={handleExport}
+        />
+
+        <AdvancedSearch 
+          onSearch={(q) => handleFilterChange({ searchQuery: q })}
+          initialQuery={filters.searchQuery}
         />
 
         <section className={styles.timelinePanel} aria-label="Events table">

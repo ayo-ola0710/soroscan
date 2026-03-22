@@ -1,0 +1,19 @@
+query GetSystemMetrics {
+  systemMetrics {
+    eventsIndexedToday
+    eventsIndexedTotal
+    webhookSuccessRate
+    avgWebhookDeliveryTime
+    activeContracts
+    lastSynced
+    dbStatus
+    redisStatus
+  }
+  recentErrors(limit: 10) {
+    id
+    timestamp
+    level
+    message
+    context
+  }
+}
