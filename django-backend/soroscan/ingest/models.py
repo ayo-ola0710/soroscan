@@ -5,6 +5,7 @@ import hashlib
 import secrets
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.db import models
 
 User = get_user_model()
@@ -175,6 +176,40 @@ class ContractABI(models.Model):
         return f"ABI for {self.contract}"
 
 
+class ContractSigningKey(models.Model):
+    """
+    Public verification key registered per contract for event signature checks.
+    """
+
+    class Algorithm(models.TextChoices):
+        ED25519 = "ed25519", "Ed25519"
+        ECDSA = "ecdsa", "ECDSA"
+
+    contract = models.OneToOneField(
+        TrackedContract,
+        on_delete=models.CASCADE,
+        related_name="signing_key",
+    )
+    algorithm = models.CharField(
+        max_length=16,
+        choices=Algorithm.choices,
+        default=Algorithm.ED25519,
+    )
+    public_key = models.TextField(
+        help_text="Public key for signature verification (hex/base64/raw PEM)",
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Contract Signing Key"
+        verbose_name_plural = "Contract Signing Keys"
+
+    def __str__(self):
+        return f"SigningKey({self.contract.contract_id[:8]}..., {self.algorithm})"
+
+
 class ContractEvent(models.Model):
     """
     Individual events emitted by tracked contracts.
@@ -247,6 +282,17 @@ class ContractEvent(models.Model):
         db_index=True,
         help_text="Result of ABI-based XDR decoding",
     )
+    signature_status = models.CharField(
+        max_length=16,
+        choices=[
+            ("valid", "Valid"),
+            ("invalid", "Invalid"),
+            ("missing", "Missing"),
+        ],
+        default="missing",
+        db_index=True,
+        help_text="Result of event signature verification",
+    )
 
     class Meta:
         ordering = ["-timestamp"]
@@ -257,6 +303,7 @@ class ContractEvent(models.Model):
             models.Index(fields=["tx_hash"]),
             models.Index(fields=["contract", "ledger", "event_index"]),
             models.Index(fields=["invocation"]),
+            models.Index(fields=["signature_status"]),
         ]
         constraints = [
             models.UniqueConstraint(
@@ -571,6 +618,105 @@ class AlertExecution(models.Model):
         return f"Alert {self.rule.name}: {self.status} @ {self.created_at}"
 
 
+class RemediationRule(models.Model):
+    """
+    Automated incident response rule.
+
+    ``condition`` describes anomaly detection criteria.
+    ``actions`` is a list of action objects, e.g.:
+      [{"type": "pause_contract"}, {"type": "disable_webhooks"}]
+    """
+
+    CONDITION_NO_EVENTS = "no_events_for_minutes"
+    CONDITION_DECODE_ERROR_SPIKE = "decode_error_spike"
+    CONDITION_CHOICES = [
+        (CONDITION_NO_EVENTS, "No events for N minutes"),
+        (CONDITION_DECODE_ERROR_SPIKE, "Decode error spike"),
+    ]
+
+    ALERT_SLACK = "slack"
+    ALERT_EMAIL = "email"
+    ALERT_WEBHOOK = "webhook"
+    ALERT_TYPE_CHOICES = [
+        (ALERT_SLACK, "Slack"),
+        (ALERT_EMAIL, "Email"),
+        (ALERT_WEBHOOK, "Webhook"),
+    ]
+
+    name = models.CharField(max_length=256)
+    condition = models.JSONField(
+        help_text="Condition JSON, e.g. {'type': 'no_events_for_minutes', 'contract_id': 'C...', 'minutes': 60}",
+    )
+    actions = models.JSONField(
+        default=list,
+        help_text="List of action objects: pause_contract, send_alert, disable_webhooks",
+    )
+    enabled = models.BooleanField(default=True)
+    grace_period_minutes = models.PositiveIntegerField(default=10)
+    alert_type = models.CharField(
+        max_length=16,
+        choices=ALERT_TYPE_CHOICES,
+        default=ALERT_SLACK,
+    )
+    alert_target = models.TextField(
+        blank=True,
+        help_text="Ops destination (Slack webhook URL, email, or webhook URL)",
+    )
+    dry_run = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"RemediationRule({self.name})"
+
+
+class RemediationIncident(models.Model):
+    """
+    Tracks lifecycle of a detected anomaly for one remediation rule.
+    """
+
+    STATUS_ALERTED = "alerted"
+    STATUS_EXECUTED = "executed"
+    STATUS_RESOLVED = "resolved"
+    STATUS_CHOICES = [
+        (STATUS_ALERTED, "Alerted"),
+        (STATUS_EXECUTED, "Executed"),
+        (STATUS_RESOLVED, "Resolved"),
+    ]
+
+    rule = models.ForeignKey(
+        RemediationRule,
+        on_delete=models.CASCADE,
+        related_name="incidents",
+    )
+    contract = models.ForeignKey(
+        TrackedContract,
+        on_delete=models.CASCADE,
+        related_name="remediation_incidents",
+    )
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default=STATUS_ALERTED)
+    anomaly_snapshot = models.JSONField(default=dict)
+    first_detected_at = models.DateTimeField(auto_now_add=True)
+    alerted_at = models.DateTimeField(null=True, blank=True)
+    action_after_at = models.DateTimeField(null=True, blank=True)
+    executed_at = models.DateTimeField(null=True, blank=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    last_seen_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-first_detected_at"]
+        indexes = [
+            models.Index(fields=["rule", "contract", "status"]),
+            models.Index(fields=["action_after_at"]),
+        ]
+
+    def __str__(self):
+        return f"Incident(rule={self.rule_id}, contract={self.contract_id}, status={self.status})"
+
+
 # ---------------------------------------------------------------------------
 # Data Retention Policies and Automated Archival
 # ---------------------------------------------------------------------------
@@ -723,3 +869,43 @@ class ArchivalAuditLog(models.Model):
 
     def __str__(self):
         return f"AuditLog({self.action}, {self.event_count} events, {self.created_at})"
+
+
+class AdminAction(models.Model):
+    """
+    Immutable audit trail for admin actions.
+
+    Records are append-only and retained for at least 7 years.
+    """
+
+    RETENTION_YEARS = 7
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+    )
+    action = models.CharField(max_length=128)
+    object_type = models.CharField(max_length=32)
+    object_id = models.CharField(max_length=255)
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    ip_address = models.GenericIPAddressField(default="0.0.0.0")
+    changes = models.JSONField(default=dict)
+
+    class Meta:
+        ordering = ["-timestamp"]
+        indexes = [
+            models.Index(fields=["action", "timestamp"]),
+            models.Index(fields=["object_type", "object_id"]),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValidationError("AdminAction is immutable and cannot be updated.")
+        return super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("AdminAction is immutable and cannot be deleted.")
+
+    def __str__(self):
+        return f"{self.action} {self.object_type}:{self.object_id}"
