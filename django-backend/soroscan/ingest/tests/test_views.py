@@ -433,36 +433,3 @@ class TestEventExplorerPageView:
         response = api_client.get(url)
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
-
-    def test_contract_event_types_endpoint(self, api_client, contract):
-        # Create events with different types
-        ContractEventFactory(contract=contract, event_type="transfer")
-        ContractEventFactory(contract=contract, event_type="transfer")
-        ContractEventFactory(contract=contract, event_type="swap")
-        
-        url = reverse("contract-event-types", args=[contract.contract_id])
-        response = api_client.get(url)
-        
-        assert response.status_code == status.HTTP_200_OK
-        data = response.json()
-        
-        # Should have 2 event types
-        assert len(data) == 2
-        
-        # Should be sorted by count (descending)
-        assert data[0]["event_type"] == "transfer"
-        assert data[0]["count"] == 2
-        assert data[1]["event_type"] == "swap"
-        assert data[1]["count"] == 1
-        
-        # Should have timestamps
-        assert "first_seen" in data[0]
-        assert "last_seen" in data[0]
-        assert "first_seen" in data[1]
-        assert "last_seen" in data[1]
-
-    def test_contract_event_types_missing_contract_returns_404(self, api_client):
-        url = reverse("contract-event-types", args=["C" + "A" * 55])
-        response = api_client.get(url)
-        
-        assert response.status_code == status.HTTP_404_NOT_FOUND

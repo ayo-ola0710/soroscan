@@ -8,7 +8,7 @@ import logging
 from datetime import timedelta
 
 from django.conf import settings
-from django.db.models import Count, Max, Min, Q
+from django.db.models import Count, Max, Q
 from django.db.models.functions import Cast
 from django.shortcuts import get_object_or_404, redirect
 from django.utils import timezone
@@ -739,30 +739,6 @@ def contract_event_explorer_view(request, contract_id: str):
     contract = get_object_or_404(TrackedContract, contract_id=contract_id)
     frontend_base = _frontend_base_url()
     return redirect(f"{frontend_base}/contracts/{contract.contract_id}/events/explorer")
-
-
-@api_view(["GET"])
-@permission_classes([AllowAny])
-def contract_event_types_view(request, contract_id: str):
-    """Get event types and their counts for a specific contract."""
-    contract = get_object_or_404(TrackedContract, contract_id=contract_id)
-    
-    cache_key = stable_cache_key("contract_event_types", {"contract_id": contract_id})
-    
-    def _build():
-        return list(
-            ContractEvent.objects.filter(contract=contract)
-            .values("event_type")
-            .annotate(
-                count=Count("id"),
-                first_seen=Min("timestamp"),
-                last_seen=Max("timestamp")
-            )
-            .order_by("-count")
-        )
-    
-    result = get_or_set_json(cache_key, 60, _build)
-    return Response(result)
 
 
 @extend_schema(
