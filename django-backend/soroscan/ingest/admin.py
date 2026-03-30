@@ -19,6 +19,7 @@ from .models import (
     ArchivedEventBatch,
     ContractABI,
     ContractEvent,
+    ContractMetadata,
     ContractSigningKey,
     ContractQuota,
     DataRetentionPolicy,
@@ -887,3 +888,33 @@ class IngestErrorAdmin(admin.ModelAdmin):
     def has_change_permission(self, request, obj=None):
         return False
 
+
+
+# ---------------------------------------------------------------------------
+# Contract Metadata Registry
+# ---------------------------------------------------------------------------
+
+class TagListFilter(admin.SimpleListFilter):
+    title = "tags"
+    parameter_name = "tags"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("has_tags", "Has Tags"),
+            ("no_tags", "No Tags"),
+        ]
+
+    def queryset(self, request, queryset):
+        if self.value() == "has_tags":
+            return queryset.exclude(tags=[])
+        if self.value() == "no_tags":
+            return queryset.filter(tags=[])
+        return queryset
+
+
+@admin.register(ContractMetadata)
+class ContractMetadataAdmin(AdminAuditMixin, admin.ModelAdmin):
+    list_display = ["contract", "name", "tags", "documentation_url", "github_repo", "team_email"]
+    search_fields = ["name", "description", "tags"]
+    list_filter = [TagListFilter]
+    readonly_fields = ["created_at", "updated_at"]

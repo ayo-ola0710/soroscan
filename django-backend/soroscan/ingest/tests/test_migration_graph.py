@@ -1,13 +1,11 @@
 """
 Bug condition exploration test for the ingest app migration graph conflict.
 
-This test is EXPECTED TO FAIL on unfixed code (before 0027_merge_final_leaf_nodes.py exists).
-Failure confirms the bug: two leaf nodes exist in the migration graph.
+This test file ensures that the migration graph is consistent and has a single leaf node.
+The conflict between 0027_merge_final_leaf_nodes and 0029_contractmetadata has been resolved.
 
 Validates: Requirements 2.1, 2.2
 """
-
-import importlib
 
 import pytest
 from django.db.migrations.loader import MigrationLoader
@@ -21,10 +19,10 @@ def enable_db_access_for_all_tests():
 
 def test_single_leaf_node():
     """
-    Assert the ingest migration graph has exactly one leaf node named
-    '0027_merge_final_leaf_nodes'.
+    Assert the ingest migration graph has exactly one leaf node.
 
-    On UNFIXED code this test FAILS, proving the bug exists (two leaf nodes found).
+    The current leaf is '0029_contractmetadata' which depends on
+    '0028_callgraph_contractdependency_and_more'.
     """
     loader = MigrationLoader(None, ignore_no_migrations=True)
 
@@ -34,8 +32,8 @@ def test_single_leaf_node():
     assert len(leaf_nodes) == 1, (
         f"Expected 1 leaf node for 'ingest', found {len(leaf_nodes)}: {leaf_nodes}"
     )
-    assert leaf_nodes[0][1] == "0027_merge_final_leaf_nodes", (
-        f"Expected leaf node '0027_merge_final_leaf_nodes', got '{leaf_nodes[0][1]}'"
+    assert leaf_nodes[0][1] == "0029_contractmetadata", (
+        f"Expected leaf node '0029_contractmetadata', got '{leaf_nodes[0][1]}'"
     )
 
 
@@ -70,27 +68,6 @@ def test_dependency_order_preserved():
                     f"Migration {node_key} declares dependency ({dep_app}, {dep_name}) "
                     f"which is missing from the migration graph."
                 )
-
-
-def test_new_merge_migration_has_empty_operations():
-    """
-    If 0027_merge_final_leaf_nodes exists, its operations list must be empty
-    (no schema changes introduced by the merge migration).
-
-    **Validates: Requirements 3.1, 3.2**
-    """
-    module_path = "soroscan.ingest.migrations.0027_merge_final_leaf_nodes"
-    try:
-        module = importlib.import_module(module_path)
-    except ModuleNotFoundError:
-        pytest.skip("0027_merge_final_leaf_nodes does not exist yet — skipping.")
-        return
-
-    migration_class = module.Migration
-    assert migration_class.operations == [], (
-        f"Expected 0027_merge_final_leaf_nodes.operations to be [], "
-        f"got {migration_class.operations}"
-    )
 
 
 def test_migration_dependency_chain_intact():

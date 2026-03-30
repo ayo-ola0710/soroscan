@@ -1325,3 +1325,38 @@ class IngestError(models.Model):
     
     def __str__(self):
         return f"{self.error_type}: {self.contract_id} at {self.created_at}"
+
+
+# ---------------------------------------------------------------------------
+# Contract Metadata Registry
+# ---------------------------------------------------------------------------
+
+class ContractMetadata(models.Model):
+    """
+    Optional rich metadata for a TrackedContract.
+
+    Stores human-readable name, description, categorization tags,
+    documentation links, GitHub repo URL, and team contact email.
+    Metadata is optional — a contract functions normally without it.
+    """
+
+    contract = models.OneToOneField(
+        TrackedContract,
+        on_delete=models.CASCADE,
+        related_name="contractmetadata",
+    )
+    name = models.CharField(max_length=256)
+    description = models.TextField(blank=True)
+    tags = models.JSONField(default=list, blank=True)
+    documentation_url = models.URLField(blank=True)
+    github_repo = models.URLField(blank=True)
+    team_email = models.EmailField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Contract Metadata"
+        verbose_name_plural = "Contract Metadata"
+
+    def __str__(self):
+        return f"Metadata({self.contract.contract_id[:8]}...)"

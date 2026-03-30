@@ -5,12 +5,12 @@ from __future__ import annotations
 import base64
 from datetime import datetime
 from enum import Enum
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, List, Optional
 
 import strawberry
 import strawberry_django
 from channels.layers import get_channel_layer
-from django.db.models import Case, Count, IntegerField, Value, When
+from django.db.models import Case, Count, IntegerField, Q, Value, When
 from django.utils import timezone
 from strawberry import auto
 from strawberry.types import Info
@@ -21,6 +21,7 @@ from .models import (
     ContractDependency,
     ContractEvent,
     ContractInvocation,
+    ContractMetadata,
     Notification,
     TrackedContract,
     WebhookDeliveryLog,
@@ -85,11 +86,36 @@ class ContractType:
             )
         ]
 
+    @strawberry.field
+    def metadata(self) -> Optional["ContractMetadataType"]:
+        try:
+            m = self.contractmetadata
+            return ContractMetadataType(
+                name=m.name,
+                description=m.description,
+                tags=m.tags,
+                documentation_url=m.documentation_url,
+                github_repo=m.github_repo,
+                team_email=m.team_email,
+            )
+        except ContractMetadata.DoesNotExist:
+            return None
+
 
 @strawberry.type
 class WarningType:
     warning_type: str = strawberry.field(name="type")
     message: str
+
+
+@strawberry.type
+class ContractMetadataType:
+    name: str
+    description: str
+    tags: strawberry.scalars.JSON
+    documentation_url: str
+    github_repo: str
+    team_email: str
 
 
 @strawberry_django.type(ContractEvent)
@@ -344,7 +370,7 @@ class Query:
     @strawberry.field
     def contracts(self, is_active: Optional[bool] = None, alias: Optional[str] = None) -> list[ContractType]:
         """Get all tracked contracts. Optionally filter by alias substring. Sorted by alias when set."""
-        qs = TrackedContract.objects.all()
+        qs = TrackedContract.objects.select_related("contractmetadata").all()
         if is_active is not None:
             qs = qs.filter(is_active=is_active)
         if alias is not None:
@@ -363,9 +389,48 @@ class Query:
     def contract(self, contract_id: str) -> Optional[ContractType]:
         """Get a specific contract by ID."""
         try:
-            return TrackedContract.objects.get(contract_id=contract_id)
+            return TrackedContract.objects.select_related("contractmetadata").get(contract_id=contract_id)
         except TrackedContract.DoesNotExist:
             return None
+
+    @strawberry.field
+    def contract_metadata(self, contract_id: str) -> Optional[ContractMetadataType]:
+        """Get metadata for a specific contract by contract ID, or null if none exists."""
+        try:
+            m = ContractMetadata.objects.select_related("contract").get(contract__contract_id=contract_id)
+            return ContractMetadataType(
+                name=m.name,
+                description=m.description,
+                tags=m.tags,
+                documentation_url=m.documentation_url,
+                github_repo=m.github_repo,
+                team_email=m.team_email,
+            )
+        except ContractMetadata.DoesNotExist:
+            return None
+
+    @strawberry.field
+    def search_contracts(
+        self,
+        query: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        limit: int = 20,
+    ) -> List[ContractType]:
+        """Search contracts by metadata name/description and/or tags."""
+        qs = TrackedContract.objects.select_related("contractmetadata").filter(
+            contractmetadata__isnull=False
+        )
+        if query is not None:
+            qs = qs.filter(
+                Q(contractmetadata__name__icontains=query)
+                | Q(contractmetadata__description__icontains=query)
+            )
+        if tags is not None:
+            for tag in tags:
+                qs = qs.filter(contractmetadata__tags__contains=[tag])
+        qs = qs.order_by("contractmetadata__name")
+        limit = min(limit, 100)
+        return qs[:limit]
 
     @strawberry.field
     def events(
@@ -771,6 +836,70 @@ class Mutation:
             raise Exception("Authentication required")
         count, _ = Notification.objects.filter(user=user).delete()
         return count
+
+    @strawberry.mutation
+    def set_contract_metadata(
+        self,
+        info: Info,
+        contract_id: str,
+        name: str,
+        description: str = "",
+        tags: Optional[List[str]] = None,
+        documentation_url: str = "",
+        github_repo: str = "",
+        team_email: str = "",
+    ) -> ContractMetadataType:
+        """Create or update metadata for a contract."""
+        from django.core.exceptions import ValidationError
+
+        user = _get_authenticated_user(info)
+        if not user:
+            raise Exception("Authentication required")
+
+        try:
+            contract = TrackedContract.objects.get(contract_id=contract_id)
+        except TrackedContract.DoesNotExist:
+            raise Exception("Contract not found")
+
+        instance, _ = ContractMetadata.objects.update_or_create(
+            contract=contract,
+            defaults={
+                "name": name,
+                "description": description,
+                "tags": tags if tags is not None else [],
+                "documentation_url": documentation_url,
+                "github_repo": github_repo,
+                "team_email": team_email,
+            },
+        )
+
+        try:
+            instance.full_clean()
+        except ValidationError as exc:
+            for field, messages in exc.message_dict.items():
+                raise Exception(f"{field}: {messages[0]}")
+
+        return ContractMetadataType(
+            name=instance.name,
+            description=instance.description,
+            tags=instance.tags,
+            documentation_url=instance.documentation_url,
+            github_repo=instance.github_repo,
+            team_email=instance.team_email,
+        )
+
+    @strawberry.mutation
+    def delete_contract_metadata(self, info: Info, contract_id: str) -> bool:
+        """Delete metadata for a contract. Returns False if no record exists."""
+        user = _get_authenticated_user(info)
+        if not user:
+            raise Exception("Authentication required")
+
+        try:
+            ContractMetadata.objects.get(contract__contract_id=contract_id).delete()
+            return True
+        except ContractMetadata.DoesNotExist:
+            return False
 
     @strawberry.mutation
     def update_contract(
