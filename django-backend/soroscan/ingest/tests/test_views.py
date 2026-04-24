@@ -8,8 +8,6 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from soroscan.ingest.models import (
-    Organization,
-    OrganizationMembership,
     Team,
     TeamMembership,
     TrackedContract,
@@ -156,47 +154,14 @@ class TestTrackedContractViewSet:
 
 
 @pytest.mark.django_db
-class TestOrganizationViewSet:
-    def test_create_and_add_member(self, authenticated_client, user):
-        url = reverse("organization-list")
-        response = authenticated_client.post(
-            url,
-            {"name": "Acme Org", "quota": 100000},
-            format="json",
-        )
-        assert response.status_code == status.HTTP_201_CREATED
-        org_id = response.data["id"]
-
-        owner_membership = OrganizationMembership.objects.get(
-            organization_id=org_id, user=user
-        )
-        assert owner_membership.role == OrganizationMembership.Role.OWNER
-
-        new_user = UserFactory()
-        add_member_url = reverse("organization-members", args=[org_id])
-        add_member = authenticated_client.post(
-            add_member_url,
-            {"user_id": new_user.id, "role": "member"},
-            format="json",
-        )
-        assert add_member.status_code == status.HTTP_201_CREATED
-
-
-@pytest.mark.django_db
 class TestTeamViewSet:
     def test_create_and_list_team(self, authenticated_client, user):
-        org = Organization.objects.create(name="Acme", slug="acme", owner=user)
-        OrganizationMembership.objects.create(
-            organization=org, user=user, role=OrganizationMembership.Role.OWNER
-        )
         url = reverse("team-list")
-        response = authenticated_client.post(
-            url, {"name": "Platform", "organization": org.id}, format="json"
-        )
+        response = authenticated_client.post(url, {"name": "Platform"}, format="json")
         assert response.status_code == status.HTTP_201_CREATED
         assert Team.objects.filter(name="Platform").exists()
         assert TeamMembership.objects.filter(
-            team__name="Platform", user=user, role=TeamMembership.Role.OWNER
+            team__name="Platform", user=user, role=TeamMembership.Role.ADMIN
         ).exists()
 
         listed = authenticated_client.get(url)
@@ -206,23 +171,14 @@ class TestTeamViewSet:
     def test_team_member_sees_team_contract(self, api_client):
         owner = UserFactory()
         member = UserFactory()
-        org = Organization.objects.create(name="Shared Org", slug="shared-org", owner=owner)
-        OrganizationMembership.objects.create(
-            organization=org, user=owner, role=OrganizationMembership.Role.OWNER
-        )
-        OrganizationMembership.objects.create(
-            organization=org, user=member, role=OrganizationMembership.Role.MEMBER
-        )
-        team = Team.objects.create(
-            name="Shared", slug="shared", organization=org, created_by=owner
-        )
+        team = Team.objects.create(name="Shared", slug="shared", created_by=owner)
         TeamMembership.objects.create(
             team=team, user=owner, role=TeamMembership.Role.ADMIN
         )
         TeamMembership.objects.create(
             team=team, user=member, role=TeamMembership.Role.MEMBER
         )
-        shared = TrackedContractFactory(owner=owner, team=team, organization=org)
+        shared = TrackedContractFactory(owner=owner, team=team)
 
         api_client.force_authenticate(user=member)
         url = reverse("contract-list")
@@ -537,6 +493,23 @@ class TestEventExplorerPageView:
         response = api_client.get(url)
 
         assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.django_db
+class TestTransactionCorrelationView:
+    def test_transaction_endpoint_groups_events(self, authenticated_client, user):
+        contract_a = TrackedContractFactory(owner=user)
+        contract_b = TrackedContractFactory(owner=user)
+        shared_tx = "tx-shared-001"
+        ContractEventFactory(contract=contract_a, tx_hash=shared_tx, ledger=12, event_index=1)
+        ContractEventFactory(contract=contract_b, tx_hash=shared_tx, ledger=12, event_index=2)
+
+        url = reverse("transaction-events", args=[shared_tx])
+        response = authenticated_client.get(url)
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["transaction_id"] == shared_tx
+        assert response.data["event_count"] == 2
 
     def test_contract_event_types_endpoint(self, api_client, contract):
         # Create events with different types

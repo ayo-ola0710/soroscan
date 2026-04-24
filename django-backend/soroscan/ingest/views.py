@@ -247,6 +247,7 @@ class ContractEventViewSet(viewsets.ReadOnlyModelViewSet):
         "contract__contract_id",
         "event_type",
         "ledger",
+        "tx_hash",
         "validation_status",
         "decoding_status",
         "signature_status",
@@ -831,6 +832,25 @@ def contract_timeline_view(request, contract_id: str):
     contract = get_object_or_404(TrackedContract, contract_id=contract_id)
     frontend_base = _frontend_base_url()
     return redirect(f"{frontend_base}/contracts/{contract.contract_id}/timeline")
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def transaction_events_view(request, tx_id: str):
+    """Return all events participating in the same atomic transaction."""
+    events = list(
+        ContractEvent.objects.select_related("contract")
+        .filter(tx_hash=tx_id)
+        .order_by("ledger", "event_index", "id")
+    )
+    serializer = ContractEventSerializer(events, many=True)
+    return Response(
+        {
+            "transaction_id": tx_id,
+            "event_count": len(events),
+            "events": serializer.data,
+        }
+    )
 
 
 def contract_event_explorer_view(request, contract_id: str):

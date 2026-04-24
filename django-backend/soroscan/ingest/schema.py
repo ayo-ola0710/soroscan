@@ -147,6 +147,10 @@ class EventType:
     def contract_name(self) -> str:
         return self.contract.name
 
+    @strawberry.field
+    def transaction_id(self) -> str:
+        return self.tx_hash
+
 
 @strawberry_django.type(ContractInvocation)
 class InvocationType:
@@ -546,6 +550,15 @@ class Query:
             return ContractEvent.objects.get(id=id)
         except ContractEvent.DoesNotExist:
             return None
+
+    @strawberry.field
+    def transaction(self, id: str) -> list[EventType]:
+        """Return cross-contract events grouped by atomic transaction id."""
+        return list(
+            ContractEvent.objects.select_related("contract")
+            .filter(tx_hash=id)
+            .order_by("ledger", "event_index", "id")
+        )
 
     @strawberry.field
     def search_events(self, query: EventSearchQuery) -> list[EventSearchResult]:

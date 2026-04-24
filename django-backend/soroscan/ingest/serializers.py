@@ -46,17 +46,12 @@ class TeamSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Team
-        fields = ["id", "name", "slug", "organization", "created_at"]
+        fields = ["id", "name", "slug", "created_at"]
         read_only_fields = ["id", "slug", "created_at"]
 
     def create(self, validated_data):
         request = self.context.get("request")
         user = getattr(request, "user", None)
-        organization = validated_data.get("organization")
-        if organization is None:
-            raise serializers.ValidationError("organization is required.")
-        if not OrganizationMembership.objects.filter(organization=organization, user=user).exists():
-            raise serializers.ValidationError("You are not a member of this organization.")
         name = validated_data["name"]
         base = slugify(name) or "team"
         slug = base
@@ -72,7 +67,7 @@ class TeamSerializer(serializers.ModelSerializer):
             TeamMembership.objects.create(
                 team=team,
                 user=user,
-                role=TeamMembership.Role.OWNER,
+                role=TeamMembership.Role.ADMIN,
             )
         return team
 
@@ -100,11 +95,6 @@ class TrackedContractSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
-    organization = serializers.PrimaryKeyRelatedField(
-        queryset=Organization.objects.all(),
-        required=False,
-        allow_null=True,
-    )
 
     class Meta:
         model = TrackedContract
@@ -123,7 +113,6 @@ class TrackedContractSerializer(serializers.ModelSerializer):
             "event_filter_type",
             "event_filter_list",
             "last_indexed_ledger",
-            "organization",
             "team",
             "event_count",
             "last_event_at",
@@ -148,26 +137,6 @@ class TrackedContractSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("You are not a member of this team.")
         return value
 
-    def validate(self, attrs):
-        attrs = super().validate(attrs)
-        request = self.context.get("request")
-        user = getattr(request, "user", None)
-        team = attrs.get("team")
-        organization = attrs.get("organization")
-
-        if organization and user and user.is_authenticated:
-            if not OrganizationMembership.objects.filter(organization=organization, user=user).exists():
-                raise serializers.ValidationError({"organization": "You are not a member of this organization."})
-
-        if team and organization and team.organization_id != organization.id:
-            raise serializers.ValidationError({"team": "Team must belong to the selected organization."})
-
-        if team and not organization:
-            attrs["organization"] = team.organization
-
-        return attrs
-
-
 class ContractEventSerializer(serializers.ModelSerializer):
     """
     Serializer for ContractEvent model.
@@ -176,6 +145,7 @@ class ContractEventSerializer(serializers.ModelSerializer):
 
     contract_id = serializers.CharField(source="contract.contract_id", read_only=True)
     contract_name = serializers.CharField(source="contract.name", read_only=True)
+    transaction_id = serializers.CharField(source="tx_hash", read_only=True)
 
     class Meta:
         model = ContractEvent
@@ -192,6 +162,7 @@ class ContractEventSerializer(serializers.ModelSerializer):
             "event_index",
             "timestamp",
             "tx_hash",
+            "transaction_id",
             "schema_version",
             "validation_status",
             "signature_status",
@@ -208,6 +179,7 @@ class ContractEventSerializer(serializers.ModelSerializer):
             "ledger",
             "timestamp",
             "tx_hash",
+            "transaction_id",
             "schema_version",
             "validation_status",
             "signature_status",
@@ -347,7 +319,6 @@ class APIKeySerializer(serializers.ModelSerializer):
             "id",
             "name",
             "key",
-            "team",
             "tier",
             "quota_per_hour",
             "is_active",
@@ -368,6 +339,7 @@ class EventSearchSerializer(serializers.ModelSerializer):
 
     contract_id = serializers.CharField(source="contract.contract_id", read_only=True)
     contract_name = serializers.CharField(source="contract.name", read_only=True)
+    transaction_id = serializers.CharField(source="tx_hash", read_only=True)
     relevance_score = serializers.SerializerMethodField()
 
     class Meta:
@@ -383,6 +355,7 @@ class EventSearchSerializer(serializers.ModelSerializer):
             "event_index",
             "timestamp",
             "tx_hash",
+            "transaction_id",
             "validation_status",
             "signature_status",
             "relevance_score",

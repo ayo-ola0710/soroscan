@@ -545,6 +545,29 @@ class TestGraphQLQueries:
         assert len(result.data["events"]["edges"]) == 1
         assert result.data["events"]["totalCount"] == 1
 
+    def test_query_transaction_groups_cross_contract_events(self, contract):
+        other_contract = TrackedContractFactory(owner=contract.owner)
+        tx_id = "tx-shared-graphql"
+        ContractEventFactory(contract=contract, tx_hash=tx_id, ledger=20, event_index=0)
+        ContractEventFactory(contract=other_contract, tx_hash=tx_id, ledger=20, event_index=1)
+
+        query = f"""
+            query {{
+                transaction(id: "{tx_id}") {{
+                    id
+                    contractId
+                    eventType
+                    transactionId
+                }}
+            }}
+        """
+        result = schema.execute_sync(query)
+        assert result.errors is None
+        assert len(result.data["transaction"]) == 2
+        assert {row["contractId"] for row in result.data["transaction"]} == {
+            contract.contract_id,
+            other_contract.contract_id,
+        }
 
 @pytest.mark.django_db
 class TestGraphQLMutations:
