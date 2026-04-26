@@ -170,6 +170,11 @@ class TrackedContract(models.Model):
         DEPRECATED = "deprecated", "Deprecated"
         SUSPENDED = "suspended", "Suspended"
 
+    class Network(models.TextChoices):
+        MAINNET = "mainnet", "Mainnet"
+        TESTNET = "testnet", "Testnet"
+        FUTURENET = "futurenet", "Futurenet"
+
     contract_id = models.CharField(
         max_length=56,
         unique=True,
@@ -245,6 +250,13 @@ class TrackedContract(models.Model):
         blank=True,
         help_text="Max events per minute for ingest-time rate limiting (None = unlimited)",
     )
+    network = models.CharField(
+        max_length=16,
+        choices=Network.choices,
+        default=Network.MAINNET,
+        db_index=True,
+        help_text="Stellar network this contract is deployed on (mainnet, testnet, futurenet)",
+    )
 
     # ---------------------------------------------------------------------------
     # Event filtering (whitelist / blacklist)
@@ -287,6 +299,7 @@ class TrackedContract(models.Model):
         indexes = [
             models.Index(fields=["contract_id", "is_active"]),
             models.Index(fields=["alias"]),
+            models.Index(fields=["network", "is_active"]),
         ]
 
     def __str__(self):

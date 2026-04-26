@@ -140,6 +140,7 @@ class TrackedContractAdmin(AdminAuditMixin, admin.ModelAdmin):
         "name",
         "alias",
         "contract_id_short",
+        "network",
         "owner",
         "team",
         "is_active",
@@ -150,17 +151,17 @@ class TrackedContractAdmin(AdminAuditMixin, admin.ModelAdmin):
         "event_count",
         "created_at",
     ]
-    list_filter = ["is_active", "deprecation_status", "event_filter_type", "created_at"]
+    list_filter = ["is_active", "network", "deprecation_status", "event_filter_type", "created_at"]
     search_fields = ["name", "alias", "contract_id"]
     readonly_fields = ["created_at", "updated_at"]
-    ordering = ["-created_at"]
+    ordering = ["-created_at", "name"]
     action_form = BackfillActionForm
     actions = ["backfill_events"]
     fieldsets = (
         (None, {
             "fields": (
                 "contract_id", "name", "alias", "description",
-                "owner", "team", "is_active",
+                "owner", "team", "network", "is_active",
             ),
         }),
         ("Event Filtering", {
@@ -194,7 +195,7 @@ class TrackedContractAdmin(AdminAuditMixin, admin.ModelAdmin):
         queryset = super().get_queryset(request)
         return queryset.annotate(
             _event_count=Count("events", distinct=True)
-        ).select_related("owner")
+        ).select_related("owner", "team")
 
     @admin.display(description="Events")
     def event_count(self, obj):

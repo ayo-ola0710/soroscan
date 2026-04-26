@@ -21,7 +21,7 @@ def test_single_leaf_node():
     """
     Assert the ingest migration graph has exactly one leaf node.
 
-    The current leaf is '0035_auditlog_piifield_datadeletionrequest_contractdeployment_contractabiversion'.
+    The current leaf is '0036_trackedcontract_network' (added by issue #277).
     """
     loader = MigrationLoader(None, ignore_no_migrations=True)
 
@@ -31,8 +31,8 @@ def test_single_leaf_node():
     assert len(leaf_nodes) == 1, (
         f"Expected 1 leaf node for 'ingest', found {len(leaf_nodes)}: {leaf_nodes}"
     )
-    assert leaf_nodes[0][1] == "0035_auditlog_piifield_datadeletionrequest_contractdeployment_contractabiversion", (
-        "Expected leaf node '0035_auditlog_piifield_datadeletionrequest_contractdeployment_contractabiversion', "
+    assert leaf_nodes[0][1] == "0036_trackedcontract_network", (
+        "Expected leaf node '0036_trackedcontract_network', "
         f"got '{leaf_nodes[0][1]}'"
     )
 
