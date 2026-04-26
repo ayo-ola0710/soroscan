@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 from soroscan.ingest.schema import schema
 from .factories import TrackedContractFactory
 
@@ -116,3 +116,70 @@ class TestGraphQLLogging:
         query_names = [c.kwargs["extra"].get("query_name") for c in mock_logger.info.call_args_list]
         assert "name" not in query_names
         assert "verificationStatus" not in query_names
+
+    @patch("soroscan.graphql_extensions.logger")
+    def test_argument_sanitization(self, mock_logger):
+        # We need a query that takes potentially sensitive arguments
+        # register_contract takes 'metadata' which could have sensitive info
+        query = """
+            mutation {
+                registerContract(
+                    contractId: "C123",
+                    name: "Secure Contract",
+                    metadata: {
+                        api_key: "secret-123",
+                        other: "public"
+                    }
+                ) {
+                    id
+                }
+            }
+        """
+        
+        # Execute mutation (we might need to mock some stuff if it fails due to auth)
+        # But for logging test, we just care about the interceptor
+        with patch("soroscan.ingest.schema._get_authenticated_user", return_value=True):
+             with patch("soroscan.ingest.models.TrackedContract.objects.create"):
+                schema.execute_sync(query)
+        
+        # Verify "started" log has masked arguments
+        started_call = [c for c in mock_logger.info.call_args_list if "started" in c[0][0]][0]
+        args = started_call.kwargs["extra"]["arguments"]
+        assert args["metadata"]["api_key"] == "********"
+        assert args["metadata"]["other"] == "public"
+
+    @patch("soroscan.graphql_extensions.logger")
+    @pytest.mark.asyncio
+    async def test_subscription_logging(self, mock_logger):
+        # Subscription setup should be logged
+        query = """
+            subscription {
+                notifications {
+                    id
+                }
+            }
+        """
+        
+        # Mocking auth and channel layer to allow subscription
+        from unittest.mock import AsyncMock
+        with patch("soroscan.ingest.schema.get_channel_layer") as mock_channel_layer:
+            mock_layer = MagicMock()
+            mock_channel_layer.return_value = mock_layer
+            mock_layer.new_channel = AsyncMock(return_value="test-channel")
+            mock_layer.receive = AsyncMock(return_value={"notification_id": 1})
+            mock_layer.group_add = AsyncMock()
+            mock_layer.group_discard = AsyncMock()
+            
+            with patch("soroscan.ingest.schema._get_authenticated_user", return_value=True):
+                 with patch("soroscan.ingest.schema.Notification.objects.get") as mock_get:
+                    mock_get.return_value = MagicMock(id=1, notification_type="test", title="Test", message="Test", link="", is_read=False, created_at=None)
+                    
+                    resp = await schema.subscribe(query)
+                    # We must iterate the async generator to trigger the resolver code
+                    async for item in resp:
+                        break
+            
+        # Verify setup logging
+        started_calls = [c for c in mock_logger.info.call_args_list if "started" in c[0][0]]
+        assert len(started_calls) >= 1
+        assert started_calls[0].kwargs["extra"]["query_name"] == "notifications"
