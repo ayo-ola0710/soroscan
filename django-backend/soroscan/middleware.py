@@ -1,6 +1,7 @@
 """
 Middleware for request-scoped log context (request_id) and slow query logging.
 """
+import json
 import logging
 import time
 import uuid
@@ -20,10 +21,30 @@ class RequestIdMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        request_id = getattr(request, "request_id", None) or uuid.uuid4().hex
+        request_id = request.META.get("HTTP_X_REQUEST_ID")
+        if not request_id:
+            request_id = getattr(request, "request_id", None) or str(uuid.uuid4())
+            
         request.request_id = request_id
         set_request_id(request_id)
-        return self.get_response(request)
+        
+        response = self.get_response(request)
+        response["X-Request-ID"] = request_id
+        
+        if response.status_code >= 400 and response.get("Content-Type", "").startswith("application/json"):
+            if not getattr(response, "streaming", False):
+                try:
+                    data = json.loads(response.content)
+                    if isinstance(data, dict):
+                        data["request_id"] = request_id
+                        new_content = json.dumps(data).encode("utf-8")
+                        response.content = new_content
+                        if "Content-Length" in response:
+                            response["Content-Length"] = str(len(new_content))
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+                    
+        return response
 
 
 class ReverseProxyFixedIPMiddleware:

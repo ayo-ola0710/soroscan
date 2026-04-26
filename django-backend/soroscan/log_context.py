@@ -33,9 +33,14 @@ class LogContextFilter(logging.Filter):
     """Add request_id and task_id from context to each LogRecord."""
 
     def filter(self, record: logging.LogRecord) -> bool:
+        if not hasattr(record, "request_id"):
+            record.request_id = ""
+        if not hasattr(record, "task_id"):
+            record.task_id = ""
+            
         ctx = log_context_var.get()
         if ctx:
             for key, value in ctx.items():
-                if value is not None and not hasattr(record, key):
+                if value is not None:
                     setattr(record, key, value)
         return True

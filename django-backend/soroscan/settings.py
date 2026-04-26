@@ -303,11 +303,11 @@ LOGGING = {
     "disable_existing_loggers": False,
     "formatters": {
         "default": {
-            "format": "%(asctime)s %(name)s %(levelname)s %(message)s",
+            "format": "%(asctime)s %(name)s %(levelname)s [req:%(request_id)s] %(message)s",
         },
         "json": {
             "()": "pythonjsonlogger.jsonlogger.JsonFormatter",
-            "format": "%(asctime)s %(name)s %(levelname)s %(message)s",
+            "format": "%(asctime)s %(name)s %(levelname)s %(request_id)s %(message)s",
         },
     },
     "handlers": {
