@@ -155,7 +155,7 @@ QUERY_CACHE_TTL_SECONDS = env.int("QUERY_CACHE_TTL_SECONDS", default=60)
 RATE_LIMIT_ANON = env("RATE_LIMIT_ANON", default="60/minute")
 RATE_LIMIT_USER = env("RATE_LIMIT_USER", default="300/minute")
 RATE_LIMIT_INGEST = env("RATE_LIMIT_INGEST", default="10/minute")
-RATE_LIMIT_GRAPHQL = env("RATE_LIMIT_GRAPHQL", default="100/minute")
+RATE_LIMIT_GRAPHQL = env("RATE_LIMIT_GRAPHQL", default="60/minute")
 
 # REST Framework
 REST_FRAMEWORK = {

@@ -7,6 +7,9 @@ from typing import Any, Callable, Dict, Optional
 
 from strawberry.extensions import SchemaExtension
 from strawberry.types import Info
+from strawberry.exceptions import StrawberryException
+from django.conf import settings
+from django.core.cache import cache
 
 logger = logging.getLogger("soroscan.graphql")
 
@@ -145,3 +148,66 @@ class GraphQLResolverLoggingExtension(SchemaExtension):
 
         # Use the shared logging wrapper
         return log_graphql_resolver(_next)(root, info, *args, **kwargs)
+
+
+class GraphQLRateLimitExtension(SchemaExtension):
+    """
+    IP-based rate limiting extension for GraphQL operations.
+    Uses Redis (via Django cache) to track requests.
+    """
+
+    def on_operation(self):
+        execution_context = self.execution_context
+        if not execution_context.context:
+            yield
+            return
+
+        request = execution_context.context.get("request")
+        if not request:
+            yield
+            return
+
+        client_ip = request.META.get("REMOTE_ADDR")
+        if not client_ip:
+            yield
+            return
+
+        rate = getattr(settings, "RATE_LIMIT_GRAPHQL", "60/minute")
+        num_requests, duration = self._parse_rate(rate)
+
+        if num_requests is None:
+            yield
+            return
+
+        cache_key = f"gql_ratelimit:{client_ip}"
+        count = cache.get(cache_key, 0)
+
+        if count >= num_requests:
+            logger.warning(
+                f"GraphQL rate limit exceeded for IP: {client_ip}",
+                extra={
+                    "client_ip": client_ip,
+                    "rate_limit": rate,
+                },
+            )
+            raise StrawberryException("Rate limit exceeded. Please try again later.")
+
+        # Increment count atomically if possible
+        if not cache.add(cache_key, 1, timeout=duration):
+            cache.incr(cache_key)
+        
+        yield
+
+    def _parse_rate(self, rate: str):
+        """
+        Parse rate string (e.g. '60/minute') into (num_requests, duration_seconds).
+        """
+        try:
+            num, period = rate.split("/")
+            num_requests = int(num)
+            # Support s(econd), m(inute), h(our), d(ay)
+            unit = period[0].lower()
+            duration = {"s": 1, "m": 60, "h": 3600, "d": 86400}.get(unit, 60)
+            return num_requests, duration
+        except (ValueError, KeyError, IndexError):
+            return None, None

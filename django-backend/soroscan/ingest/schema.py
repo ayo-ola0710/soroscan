@@ -28,7 +28,11 @@ from .models import (
     WebhookDeliveryLog,
 )
 from .services.timeline import build_timeline
-from ..graphql_extensions import GraphQLResolverLoggingExtension, log_graphql_resolver
+from ..graphql_extensions import (
+    GraphQLRateLimitExtension,
+    GraphQLResolverLoggingExtension,
+    log_graphql_resolver,
+)
 
 
 def _get_authenticated_user(info: Info):
@@ -1142,5 +1146,8 @@ schema = strawberry.Schema(
     query=Query,
     mutation=Mutation,
     subscription=Subscription,
-    extensions=[GraphQLResolverLoggingExtension],
+    extensions=[
+        GraphQLRateLimitExtension,
+        GraphQLResolverLoggingExtension,
+    ],
 )
