@@ -70,12 +70,14 @@ ENABLE_SILK = env.bool("ENABLE_SILK", default=False)
 MIDDLEWARE = [
     # PrometheusBeforeMiddleware must be first to capture all requests.
     "django_prometheus.middleware.PrometheusBeforeMiddleware",
+    "soroscan.middleware.RequestBodySizeMiddleware",
     "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "soroscan.middleware.ReverseProxyFixedIPMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "soroscan.middleware.RequestIdMiddleware",
     "soroscan.middleware.SlowQueryMiddleware",
+    "soroscan.middleware.ApiDeprecationMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -453,3 +455,15 @@ if SENTRY_DSN:
         send_default_pii=False,
         environment=env("SENTRY_ENVIRONMENT", default="production"),
     )
+
+# --- Request Size Limit (Issue #338) ---
+# Default to 10MB (10 * 1024 * 1024 bytes)
+MAX_REQUEST_BODY_SIZE = env.int("MAX_REQUEST_BODY_SIZE", default=10485760)
+
+# --- API Deprecation (Issue #336) ---
+DEPRECATED_ENDPOINTS = {
+    "/api/audit-trail/": {
+        "sunset": "2026-12-31",
+        "replacement": "/graphql/"
+    }
+}

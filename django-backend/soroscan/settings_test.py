@@ -34,7 +34,8 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    "django_prometheus.middleware.PrometheusBeforeMiddleware",  # must be first
+    "django_prometheus.middleware.PrometheusBeforeMiddleware",
+    "soroscan.middleware.RequestBodySizeMiddleware", 
     "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -44,7 +45,8 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "django_prometheus.middleware.PrometheusAfterMiddleware",   # must be last
+    "soroscan.middleware.ApiDeprecationMiddleware",
+    "django_prometheus.middleware.PrometheusAfterMiddleware",
 ]
 
 ROOT_URLCONF = "soroscan.urls_test"  # safe mirror — excludes strawberry/GDAL import
@@ -183,3 +185,6 @@ LOGGING = {
         "level": "WARNING",
     },
 }
+
+MAX_REQUEST_BODY_SIZE = 10485760
+DEPRECATED_ENDPOINTS = {}
