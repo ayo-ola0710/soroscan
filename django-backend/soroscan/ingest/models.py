@@ -666,9 +666,9 @@ class WebhookSubscription(models.Model):
         help_text="Strategy for calculating retry delays",
     )
     retry_backoff_seconds = models.PositiveIntegerField(
-        default=60,
+        default=2,
         validators=[MinValueValidator(1), MaxValueValidator(3600)],
-        help_text="Base seconds for backoff calculation (1-3600, default: 60)",
+        help_text="Base seconds for backoff calculation (e.g. 2s, 4s, 8s...) (1-3600, default: 2)",
     )
     signature_algorithm = models.CharField(
         max_length=16,

@@ -153,10 +153,9 @@ def calculate_backoff(attempt: int, strategy: str, base_seconds: int) -> int:
     Returns:
         Backoff delay in seconds
 
-    Examples:
-        - exponential with base_seconds=60, attempt=2: 60 * 2^2 = 240 seconds
-        - linear with base_seconds=60, attempt=2: 60 * 2 = 120 seconds
-        - fixed with base_seconds=60: always returns 60 seconds
+    Note:
+        For 'exponential' strategy, it is recommended to use Celery's built-in
+        retry_backoff parameter instead of this function to get better jitter support.
     """
     if strategy == "exponential":
         # base_seconds * 2^attempt
@@ -681,13 +680,18 @@ def validate_event_payload(
 @shared_task(
     name="ingest.tasks.dispatch_webhook",
     bind=True,
-    autoretry_for=(requests.exceptions.RequestException,),
     max_retries=5,
 )
 def dispatch_webhook(self, subscription_id: int, event_id: int) -> bool:
     """
     Deliver a single ContractEvent to a WebhookSubscription endpoint.
-    Uses configurable backoff strategy for retries based on webhook subscription settings.
+
+    Retry Policy:
+    - Maximum Retries: 5 (total 6 attempts)
+    - Backoff Strategy: Exponential by default (2^attempt * base)
+    - Base Delay: Configurable per subscription (default 2s)
+    - Jitter: Applied to exponential retries to prevent thundering herds
+    - Suspension: Subscriptions are suspended after all retries are exhausted.
     """
     _start = time.monotonic()
     m = _get_metrics()
@@ -793,6 +797,12 @@ def dispatch_webhook(self, subscription_id: int, event_id: int) -> bool:
 
             # If no Retry-After header, use webhook's backoff strategy
             if countdown is None:
+                if webhook.retry_backoff_strategy == WebhookSubscription.BACKOFF_EXPONENTIAL:
+                    raise self.retry(
+                        exc=requests.HTTPError("Rate limited (429)", response=response),
+                        retry_backoff=webhook.retry_backoff_seconds,
+                        retry_jitter=True,
+                    )
                 countdown = calculate_backoff(
                     self.request.retries,
                     webhook.retry_backoff_strategy,
@@ -870,6 +880,9 @@ def dispatch_webhook(self, subscription_id: int, event_id: int) -> bool:
             raise
 
         # Retry with backoff based on webhook's strategy
+        if webhook.retry_backoff_strategy == WebhookSubscription.BACKOFF_EXPONENTIAL:
+            raise self.retry(retry_backoff=webhook.retry_backoff_seconds, retry_jitter=True)
+
         countdown = calculate_backoff(
             self.request.retries,
             webhook.retry_backoff_strategy,
@@ -904,12 +917,15 @@ def dispatch_webhook(self, subscription_id: int, event_id: int) -> bool:
             raise
 
         # Retry with backoff based on webhook's strategy
+        if webhook.retry_backoff_strategy == WebhookSubscription.BACKOFF_EXPONENTIAL:
+            raise self.retry(exc=exc, retry_backoff=webhook.retry_backoff_seconds, retry_jitter=True)
+
         countdown = calculate_backoff(
             self.request.retries,
             webhook.retry_backoff_strategy,
             webhook.retry_backoff_seconds,
         )
-        raise self.retry(countdown=countdown)
+        raise self.retry(exc=exc, countdown=countdown)
 
     m.webhook_delivery_duration_seconds.observe(time.monotonic() - _start)
     m.task_duration_seconds.labels(task_name="dispatch_webhook").observe(

@@ -845,3 +845,39 @@ class TestEvaluateRemediationRules:
         incident = RemediationIncident.objects.get(rule=rule, contract=contract)
         assert incident.status == RemediationIncident.STATUS_RESOLVED
         assert AdminAction.objects.filter(action="remediation_resolved").exists()
+
+
+@pytest.mark.django_db
+class TestWebhookBackoff:
+    """Tests for exponential backoff logic in webhook dispatch."""
+
+    def test_calculate_backoff_exponential(self):
+        from soroscan.ingest.tasks import calculate_backoff
+        # attempt=0 -> 2 * 2^0 = 2
+        assert calculate_backoff(0, "exponential", 2) == 2
+        # attempt=1 -> 2 * 2^1 = 4
+        assert calculate_backoff(1, "exponential", 2) == 4
+        # attempt=2 -> 2 * 2^2 = 8
+        assert calculate_backoff(2, "exponential", 2) == 8
+
+    def test_calculate_backoff_linear(self):
+        from soroscan.ingest.tasks import calculate_backoff
+        # attempt=0 -> 2 * (0 + 1) = 2
+        assert calculate_backoff(0, "linear", 2) == 2
+        # attempt=1 -> 2 * (1 + 1) = 4
+        assert calculate_backoff(1, "linear", 2) == 4
+        # attempt=2 -> 2 * (2 + 1) = 6
+        assert calculate_backoff(2, "linear", 2) == 6
+
+    @responses.activate
+    def test_dispatch_webhook_exponential_retry_triggered(self, webhook, event):
+        """Verify that 500 error triggers a retry when exponential strategy is used."""
+        webhook.retry_backoff_strategy = WebhookSubscription.BACKOFF_EXPONENTIAL
+        webhook.retry_backoff_seconds = 2
+        webhook.save()
+
+        responses.add(responses.POST, webhook.target_url, status=500)
+
+        with pytest.raises(Retry):
+            dispatch_webhook.apply(args=[webhook.id, event.id], retries=0, throw=True)
+
