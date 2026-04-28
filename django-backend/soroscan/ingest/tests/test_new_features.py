@@ -370,6 +370,35 @@ class SlowQueryMiddlewareTests(TestCase):
         response = mw(request)
         self.assertEqual(response.get("X-RateLimit-Limit"), "50")
 
+    @patch("soroscan.middleware.slow_query_logger")
+    def test_logs_slow_query_with_params(self, mock_logger):
+        from soroscan.middleware import SlowQueryMiddleware
+        from django.db import connection
+
+        # Override the threshold to ensure the query is always considered "slow"
+        mw = SlowQueryMiddleware(lambda r: MagicMock())
+        mw.threshold_ms = 0
+        
+        request = RequestFactory().get("/")
+        
+        # We need to simulate a DB query through the middleware.
+        # Since the middleware sets up a connection.execute_wrapper during the request,
+        # we can just call it with a fake execute function.
+        def get_response(req):
+            # Inside the wrapper, doing an actual query
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1 FROM sqlite_master WHERE name = %s", ["test"])
+            return {}
+            
+        mw = SlowQueryMiddleware(get_response)
+        mw.threshold_ms = -1 # Always trigger slow query log
+        mw(request)
+        
+        mock_logger.warning.assert_called()
+        # Verify that the params are in the extra dict or the log message
+        args, kwargs = mock_logger.warning.call_args
+        self.assertIn("['test']", kwargs.get("extra", {}).get("params", ""))
+
 
 # ---------------------------------------------------------------------------
 # APIKeyViewSet tests
