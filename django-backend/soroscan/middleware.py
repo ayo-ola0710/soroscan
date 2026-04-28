@@ -152,3 +152,17 @@ class ApiDeprecationMiddleware:
                 response["Link"] = f'<{config.get("replacement", "")}>; rel="replacement"'
                 break
         return response
+
+
+from django.middleware.gzip import GZipMiddleware
+
+class ConditionalGZipMiddleware(GZipMiddleware):
+    """
+    Compress content if the browser allows gzip compression,
+    but only if the response is larger than 1KB.
+    """
+    def process_response(self, request, response):
+        if not response.streaming and len(response.content) < 1024:
+            return response
+            
+        return super().process_response(request, response)

@@ -372,6 +372,62 @@ class SlowQueryMiddlewareTests(TestCase):
 
 
 # ---------------------------------------------------------------------------
+# ConditionalGZipMiddleware tests
+# ---------------------------------------------------------------------------
+
+class ConditionalGZipMiddlewareTests(TestCase):
+    def test_compresses_large_response(self):
+        from soroscan.middleware import ConditionalGZipMiddleware
+        from django.http import HttpResponse
+        
+        content = "x" * 2000
+        
+        def get_response(req):
+            return HttpResponse(content)
+            
+        mw = ConditionalGZipMiddleware(get_response)
+        request = RequestFactory().get("/", HTTP_ACCEPT_ENCODING="gzip")
+        response = mw(request)
+        
+        self.assertEqual(response.get("Content-Encoding"), "gzip")
+        self.assertNotEqual(response.content, content.encode())
+        self.assertTrue(len(response.content) < len(content))
+
+    def test_does_not_compress_small_response(self):
+        from soroscan.middleware import ConditionalGZipMiddleware
+        from django.http import HttpResponse
+        
+        content = "x" * 500
+        
+        def get_response(req):
+            return HttpResponse(content)
+            
+        mw = ConditionalGZipMiddleware(get_response)
+        request = RequestFactory().get("/", HTTP_ACCEPT_ENCODING="gzip")
+        response = mw(request)
+        
+        self.assertIsNone(response.get("Content-Encoding"))
+        self.assertEqual(response.content, content.encode())
+
+    def test_does_not_compress_if_already_compressed(self):
+        from soroscan.middleware import ConditionalGZipMiddleware
+        from django.http import HttpResponse
+        
+        content = b"fakecompressed" * 200 # Over 1KB
+        
+        def get_response(req):
+            resp = HttpResponse(content)
+            resp["Content-Encoding"] = "gzip"
+            return resp
+            
+        mw = ConditionalGZipMiddleware(get_response)
+        request = RequestFactory().get("/", HTTP_ACCEPT_ENCODING="gzip")
+        response = mw(request)
+        
+        self.assertEqual(response.content, content)
+
+
+# ---------------------------------------------------------------------------
 # APIKeyViewSet tests
 # ---------------------------------------------------------------------------
 
